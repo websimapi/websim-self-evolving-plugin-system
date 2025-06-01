@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Self-Evolving Plugin System</title>
+    <script type="importmap">
+        {
+            "imports": {
+                "react": "https://esm.sh/react@18.2.0",
+                "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+                "@websim/use-query": "https://esm.websim.com/@websim/use-query"
+            }
+        }
+    </script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .plugin-patch {
+            animation: slideIn 0.5s ease-out;
+            border-left: 4px solid #3b82f6;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(-20px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .processing {
+            animation: pulse 2s infinite;
+        }
+        .error-flash {
+            animation: errorFlash 0.5s ease-out;
+        }
+        @keyframes errorFlash {
+            0% { background-color: #fef2f2; }
+            100% { background-color: transparent; }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <!-- Metadata Comments for Plugin Generation -->
+    <!-- 
+    COMMENT: Add a dark mode toggle button
+    USER: testuser1
+    TIMESTAMP: 2024-01-01T12:00:00Z
+    -->
+    
+    <!-- 
+    COMMENT: Create a particle animation background
+    USER: designer_bob
+    TIMESTAMP: 2024-01-01T12:05:00Z
+    -->
+    
+    <!-- 
+    COMMENT: Add a real-time visitor counter
+    USER: dev_sarah
+    TIMESTAMP: 2024-01-01T12:10:00Z
+    -->
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useRef } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { WebsimSocket, useQuery } from '@websim/use-query';
+
+        // Database setup
+        const room = new WebsimSocket({
+            schema: {
+                plugin: {
+                    id: "uuid",
+                    comment_text: "text",
+                    plugin_json: "jsonb",
+                    status: "text", // 'processing', 'active', 'error'
+                    error_message: "text",
+                    applied_at: "timestamptz",
+                    comment_user: "text",
+                    retry_count: "integer"
+                },
+                page_state: {
+                    id: "uuid",
+                    current_plugins: "jsonb",
+                    last_comment_check: "timestamptz"
+                }
+            }
+        });
+
+        // Plugin system
+        class PluginSystem {
+            constructor() {
+                this.activePlugins = [];
+                this.sandboxContainer = null;
+            }
+
+            async applyPlugin(pluginData) {
+                try {
+                    // Validate plugin structure
+                    if (!pluginData.id || !pluginData.type || !pluginData.content) {
+                        throw new Error('Invalid plugin structure');
+                    }
+
+                    // Sandbox test first
+                    await this.sandboxTest(pluginData);
+
+                    // Apply to actual page
+                    switch (pluginData.type) {
+                        case 'css':
+                            this.applyCSSPlugin(pluginData);
+                            break;
+                        case 'component':
+                            this.applyComponentPlugin(pluginData);
+                            break;
+                        case 'script':
+                            this.applyScriptPlugin(pluginData);
+                            break;
+                        default:
+                            throw new Error(`Unknown plugin type: ${pluginData.type}`);
+                    }
+
+                    this.activePlugins.push(pluginData);
+                    return true;
+                } catch (error) {
+                    console.error('Plugin application failed:', error);
+                    throw error;
+                }
+            }
+
+            async sandboxTest(pluginData) {
+                return new Promise((resolve, reject) => {
+                    try {
+                        // Create sandboxed iframe for testing
+                        const iframe = document.createElement('iframe');
+                        iframe.style.display = 'none';
+                        iframe.sandbox = 'allow-scripts';
+                        
+                        iframe.onload = () => {
+                            try {
+                                // Test plugin in sandbox
+                                const testDoc = iframe.contentDocument;
+                                
+                                if (pluginData.type === 'css') {
+                                    const style = testDoc.createElement('style');
+                                    style.textContent = pluginData.content.css;
+                                    testDoc.head.appendChild(style);
+                                } else if (pluginData.type === 'script') {
+                                    const script = testDoc.createElement('script');
+                                    script.textContent = pluginData.content.javascript;
+                                    testDoc.head.appendChild(script);
+                                }
+                                
+                                // If we get here, plugin is safe
+                                document.body.removeChild(iframe);
+                                resolve();
+                            } catch (sandboxError) {
+                                document.body.removeChild(iframe);
+                                reject(new Error(`Sandbox test failed: ${sandboxError.message}`));
+                            }
+                        };
+
+                        iframe.src = 'about:blank';
+                        document.body.appendChild(iframe);
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
+            }
+
+            applyCSSPlugin(pluginData) {
+                const style = document.createElement('style');
+                style.id = `plugin-${pluginData.id}`;
+                style.textContent = pluginData.content.css;
+                document.head.appendChild(style);
+            }
+
+            applyComponentPlugin(pluginData) {
+                // Create container for component
+                const container = document.createElement('div');
+                container.id = `plugin-component-${pluginData.id}`;
+                container.className = 'plugin-component';
+                container.innerHTML = pluginData.content.html;
+                
+                // Add to designated plugin area
+                const pluginArea = document.getElementById('plugin-area');
+                if (pluginArea) {
+                    pluginArea.appendChild(container);
+                }
+            }
+
+            applyScriptPlugin(pluginData) {
+                const script = document.createElement('script');
+                script.id = `plugin-script-${pluginData.id}`;
+                script.textContent = pluginData.content.javascript;
+                document.head.appendChild(script);
+            }
+        }
+
+        const pluginSystem = new PluginSystem();
+
+        // Comment processor
+        async function processMetadataComments() {
+            const currentUser = await window.websim.getCurrentUser();
+            if (!currentUser) return;
+
+            // Extract comments from HTML
+            const htmlContent = document.documentElement.outerHTML;
+            const commentRegex = /<!--\s*COMMENT:\s*(.*?)\s*USER:\s*(.*?)\s*TIMESTAMP:\s*(.*?)\s*-->/gs;
+            const comments = [];
+            let match;
+
+            while ((match = commentRegex.exec(htmlContent)) !== null) {
+                comments.push({
+                    text: match[1].trim(),
+                    user: match[2].trim(),
+                    timestamp: match[3].trim()
+                });
+            }
+
+            // Process comments from current user that haven't been processed
+            const {data: existingPlugins} = await room.collection('plugin').getList();
+            
+            for (const comment of comments) {
+                if (comment.user === currentUser.username) {
+                    const alreadyProcessed = existingPlugins.some(p => 
+                        p.comment_text === comment.text && p.comment_user === comment.user
+                    );
+
+                    if (!alreadyProcessed) {
+                        await generateAndApplyPlugin(comment);
+                    }
+                }
+            }
+        }
+
+        async function generateAndApplyPlugin(comment) {
+            try {
+                // Create processing entry
+                const processingEntry = await room.collection('plugin').upsert({
+                    comment_text: comment.text,
+                    comment_user: comment.user,
+                    status: 'processing',
+                    retry_count: 0
+                });
+
+                // Generate plugin using LLM
+                const pluginJson = await generatePluginWithLLM(comment.text);
+                
+                // Validate and sandbox test
+                await pluginSystem.sandboxTest(pluginJson);
+
+                // Update database with successful plugin
+                await room.collection('plugin').upsert({
+                    id: processingEntry.id,
+                    plugin_json: pluginJson,
+                    status: 'active',
+                    applied_at: new Date().toISOString()
+                });
+
+                // Apply to page
+                await pluginSystem.applyPlugin(pluginJson);
+
+            } catch (error) {
+                console.error('Plugin generation failed:', error);
+                
+                // Update database with error
+                await room.collection('plugin').upsert({
+                    id: processingEntry.id,
+                    status: 'error',
+                    error_message: error.message,
+                    retry_count: (processingEntry.retry_count || 0) + 1
+                });
+
+                // Retry with error feedback if under retry limit
+                if ((processingEntry.retry_count || 0) < 2) {
+                    setTimeout(() => retryPluginGeneration(processingEntry.id, comment, error.message), 5000);
+                }
+            }
+        }
+
+        async function generatePluginWithLLM(commentText) {
+            const systemPrompt = `You are a plugin generator for a self-evolving webpage. Generate a valid JSON plugin based on the user's comment.
+
+Plugin structure:
+{
+  "id": "unique-id",
+  "type": "css|component|script",
+  "name": "descriptive name",
+  "description": "what this plugin does",
+  "content": {
+    "css": "CSS code (if type is css)",
+    "html": "HTML code (if type is component)", 
+    "javascript": "JS code (if type is script)"
+  }
+}
+
+Rules:
+- Always include an id, type, name, description, and content
+- CSS should be scoped to avoid conflicts
+- Components should be self-contained
+- Scripts should be safe and non-destructive
+- Respond ONLY with valid JSON, no other text`;
+
+            const completion = await websim.chat.completions.create({
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: `Create a plugin for: ${commentText}` }
+                ],
+                json: true
+            });
+
+            return JSON.parse(completion.content);
+        }
+
+        async function retryPluginGeneration(pluginId, comment, previousError) {
+            try {
+                const retryPrompt = `Previous attempt failed with error: ${previousError}. Please fix and try again: ${comment.text}`;
+                const pluginJson = await generatePluginWithLLM(retryPrompt);
+                
+                await pluginSystem.sandboxTest(pluginJson);
+
+                await room.collection('plugin').upsert({
+                    id: pluginId,
+                    plugin_json: pluginJson,
+                    status: 'active',
+                    applied_at: new Date().toISOString()
+                });
+
+                await pluginSystem.applyPlugin(pluginJson);
+            } catch (error) {
+                await room.collection('plugin').upsert({
+                    id: pluginId,
+                    status: 'error',
+                    error_message: `Retry failed: ${error.message}`
+                });
+            }
+        }
+
+        // Main App Component
+        function App() {
+            const {data: plugins, loading} = useQuery(room.collection('plugin'));
+            const [isProcessing, setIsProcessing] = useState(false);
+
+            // Load existing plugins on mount
+            useEffect(() => {
+                if (plugins) {
+                    plugins.forEach(plugin => {
+                        if (plugin.status === 'active' && plugin.plugin_json) {
+                            pluginSystem.applyPlugin(plugin.plugin_json).catch(console.error);
+                        }
+                    });
+                }
+            }, [plugins]);
+
+            // Check for new comments periodically
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    setIsProcessing(true);
+                    processMetadataComments().finally(() => setIsProcessing(false));
+                }, 10000);
+
+                // Initial check
+                processMetadataComments();
+
+                return () => clearInterval(interval);
+            }, []);
+
+            const activePlugins = plugins?.filter(p => p.status === 'active') || [];
+            const processingPlugins = plugins?.filter(p => p.status === 'processing') || [];
+            const errorPlugins = plugins?.filter(p => p.status === 'error') || [];
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+                    <div className="container mx-auto px-4 py-8">
+                        <header className="text-center mb-12">
+                            <h1 className="text-4xl font-bold text-gray-800 mb-4">
+                                Self-Evolving Plugin System
+                            </h1>
+                            <p className="text-lg text-gray-600 mb-4">
+                                Add comments to the HTML metadata to evolve this page in real-time
+                            </p>
+                            <div className={`inline-flex items-center space-x-2 px-4 py-2 rounded-full ${isProcessing ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>
+                                <div className={`w-2 h-2 rounded-full ${isProcessing ? 'bg-yellow-500 processing' : 'bg-green-500'}`}></div>
+                                <span>{isProcessing ? 'Processing comments...' : 'Monitoring for changes'}</span>
+                            </div>
+                        </header>
+
+                        <div className="grid md:grid-cols-2 gap-8 mb-8">
+                            <div className="bg-white rounded-lg shadow-lg p-6">
+                                <h2 className="text-2xl font-semibold mb-4 text-gray-800">Active Plugins</h2>
+                                <div className="space-y-3">
+                                    {activePlugins.map(plugin => (
+                                        <div key={plugin.id} className="plugin-patch bg-blue-50 p-4 rounded-lg">
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <h3 className="font-semibold text-gray-800">
+                                                        {plugin.plugin_json?.name || 'Unnamed Plugin'}
+                                                    </h3>
+                                                    <p className="text-sm text-gray-600">
+                                                        {plugin.plugin_json?.description || plugin.comment_text}
+                                                    </p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <div className="text-sm font-medium text-blue-600">
+                                                        @{plugin.comment_user}
+                                                    </div>
+                                                    <div className="text-xs text-gray-500">
+                                                        {new Date(plugin.applied_at).toLocaleTimeString()}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {activePlugins.length === 0 && (
+                                        <p className="text-gray-500 italic">No active plugins yet</p>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="bg-white rounded-lg shadow-lg p-6">
+                                <h2 className="text-2xl font-semibold mb-4 text-gray-800">System Status</h2>
+                                
+                                {processingPlugins.length > 0 && (
+                                    <div className="mb-4">
+                                        <h3 className="font-semibold text-yellow-600 mb-2">Processing</h3>
+                                        {processingPlugins.map(plugin => (
+                                            <div key={plugin.id} className="bg-yellow-50 p-3 rounded processing">
+                                                <p className="text-sm">{plugin.comment_text}</p>
+                                                <p className="text-xs text-yellow-600">by @{plugin.comment_user}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {errorPlugins.length > 0 && (
+                                    <div className="mb-4">
+                                        <h3 className="font-semibold text-red-600 mb-2">Errors</h3>
+                                        {errorPlugins.map(plugin => (
+                                            <div key={plugin.id} className="bg-red-50 p-3 rounded error-flash">
+                                                <p className="text-sm">{plugin.comment_text}</p>
+                                                <p className="text-xs text-red-600">{plugin.error_message}</p>
+                                                <p className="text-xs text-gray-500">by @{plugin.comment_user}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                <div className="bg-gray-50 p-4 rounded-lg">
+                                    <h3 className="font-semibold text-gray-700 mb-2">How it works</h3>
+                                    <ol className="text-sm text-gray-600 space-y-1">
+                                        <li>1. Add HTML comments with COMMENT, USER, and TIMESTAMP</li>
+                                        <li>2. System detects your comments automatically</li>
+                                        <li>3. LLM generates plugin JSON from your request</li>
+                                        <li>4. Plugin is sandboxed and tested for safety</li>
+                                        <li>5. If safe, plugin is applied to the page</li>
+                                    </ol>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Plugin rendering area */}
+                        <div id="plugin-area" className="bg-white rounded-lg shadow-lg p-6">
+                            <h2 className="text-2xl font-semibold mb-4 text-gray-800">Dynamic Plugin Content</h2>
+                            <p className="text-gray-600 mb-4">
+                                Plugin-generated content will appear here as they are processed and applied.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
+
