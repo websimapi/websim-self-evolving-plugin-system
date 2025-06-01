@@ -58,6 +58,18 @@
     TIMESTAMP: 2024-01-01T12:10:00Z
     -->
 
+    <!-- 
+    COMMENT: Make the buttons glow when hovered
+    USER: testuser1
+    TIMESTAMP: 2024-01-01T12:15:00Z
+    -->
+
+    <!-- 
+    COMMENT: Add a confetti effect when plugins load
+    USER: testuser1
+    TIMESTAMP: 2024-01-01T12:20:00Z
+    -->
+
     <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useRef } from 'react';
         import { createRoot } from 'react-dom/client';
@@ -337,6 +349,7 @@ Rules:
         function App() {
             const {data: plugins, loading} = useQuery(room.collection('plugin'));
             const [isProcessing, setIsProcessing] = useState(false);
+            const [processingComments, setProcessingComments] = useState([]);
 
             // Load existing plugins on mount
             useEffect(() => {
@@ -351,9 +364,13 @@ Rules:
 
             // Check for new comments periodically
             useEffect(() => {
-                const interval = setInterval(() => {
+                const interval = setInterval(async () => {
                     setIsProcessing(true);
-                    processMetadataComments().finally(() => setIsProcessing(false));
+                    try {
+                        await processMetadataComments();
+                    } finally {
+                        setIsProcessing(false);
+                    }
                 }, 10000);
 
                 // Initial check
@@ -374,13 +391,44 @@ Rules:
                                 Self-Evolving Plugin System
                             </h1>
                             <p className="text-lg text-gray-600 mb-4">
-                                Add comments to the HTML metadata to evolve this page in real-time
+                                Add any comment to the HTML metadata - the AI will interpret it and create a plugin automatically
                             </p>
                             <div className={`inline-flex items-center space-x-2 px-4 py-2 rounded-full ${isProcessing ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>
                                 <div className={`w-2 h-2 rounded-full ${isProcessing ? 'bg-yellow-500 processing' : 'bg-green-500'}`}></div>
-                                <span>{isProcessing ? 'Processing comments...' : 'Monitoring for changes'}</span>
+                                <span>{isProcessing ? 'Scanning for new comments...' : 'Monitoring for changes'}</span>
                             </div>
                         </header>
+
+                        {/* Processing Comments Indicator */}
+                        {processingPlugins.length > 0 && (
+                            <div className="mb-6 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg">
+                                <div className="flex items-center">
+                                    <div className="w-3 h-3 bg-yellow-400 rounded-full processing mr-3"></div>
+                                    <h3 className="text-lg font-semibold text-yellow-800">
+                                        Processing Comments into Plugins...
+                                    </h3>
+                                </div>
+                                <div className="mt-3 space-y-2">
+                                    {processingPlugins.map(plugin => (
+                                        <div key={plugin.id} className="bg-white p-3 rounded border-l-2 border-yellow-300">
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <p className="font-medium text-gray-800">"{plugin.comment_text}"</p>
+                                                    <p className="text-sm text-gray-600">AI is interpreting this comment and generating a plugin...</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className="text-sm font-medium text-yellow-600">@{plugin.comment_user}</span>
+                                                    <div className="flex items-center mt-1">
+                                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-600"></div>
+                                                        <span className="ml-2 text-xs text-gray-500">Processing...</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
                         <div className="grid md:grid-cols-2 gap-8 mb-8">
                             <div className="bg-white rounded-lg shadow-lg p-6">
@@ -417,26 +465,17 @@ Rules:
                             <div className="bg-white rounded-lg shadow-lg p-6">
                                 <h2 className="text-2xl font-semibold mb-4 text-gray-800">System Status</h2>
                                 
-                                {processingPlugins.length > 0 && (
-                                    <div className="mb-4">
-                                        <h3 className="font-semibold text-yellow-600 mb-2">Processing</h3>
-                                        {processingPlugins.map(plugin => (
-                                            <div key={plugin.id} className="bg-yellow-50 p-3 rounded processing">
-                                                <p className="text-sm">{plugin.comment_text}</p>
-                                                <p className="text-xs text-yellow-600">by @{plugin.comment_user}</p>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-
                                 {errorPlugins.length > 0 && (
                                     <div className="mb-4">
-                                        <h3 className="font-semibold text-red-600 mb-2">Errors</h3>
+                                        <h3 className="font-semibold text-red-600 mb-2">Failed Interpretations</h3>
                                         {errorPlugins.map(plugin => (
                                             <div key={plugin.id} className="bg-red-50 p-3 rounded error-flash">
-                                                <p className="text-sm">{plugin.comment_text}</p>
-                                                <p className="text-xs text-red-600">{plugin.error_message}</p>
+                                                <p className="text-sm font-medium">"{plugin.comment_text}"</p>
+                                                <p className="text-xs text-red-600 mt-1">{plugin.error_message}</p>
                                                 <p className="text-xs text-gray-500">by @{plugin.comment_user}</p>
+                                                {(plugin.retry_count || 0) < 2 && (
+                                                    <p className="text-xs text-blue-600 mt-1">Retrying interpretation...</p>
+                                                )}
                                             </div>
                                         ))}
                                     </div>
@@ -445,12 +484,15 @@ Rules:
                                 <div className="bg-gray-50 p-4 rounded-lg">
                                     <h3 className="font-semibold text-gray-700 mb-2">How it works</h3>
                                     <ol className="text-sm text-gray-600 space-y-1">
-                                        <li>1. Add HTML comments with COMMENT, USER, and TIMESTAMP</li>
-                                        <li>2. System detects your comments automatically</li>
-                                        <li>3. LLM generates plugin JSON from your request</li>
+                                        <li>1. Add HTML comments with any text describing what you want</li>
+                                        <li>2. AI automatically interprets your comment into a plugin idea</li>
+                                        <li>3. System generates plugin JSON from your request</li>
                                         <li>4. Plugin is sandboxed and tested for safety</li>
-                                        <li>5. If safe, plugin is applied to the page</li>
+                                        <li>5. If safe, plugin is applied to evolve the page</li>
                                     </ol>
+                                    <p className="text-xs text-gray-500 mt-2">
+                                        Examples: "dark mode", "add animations", "visitor counter", "make buttons sparkle"
+                                    </p>
                                 </div>
                             </div>
                         </div>
@@ -473,4 +515,3 @@ Rules:
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
-
