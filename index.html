@@ -207,53 +207,24 @@
 
         const pluginSystem = new PluginSystem();
 
-        // Comment processor
-        async function processMetadataComments() {
-            const currentUser = await window.websim.getCurrentUser();
-            if (!currentUser) return;
-
-            // Extract comments from HTML
-            const htmlContent = document.documentElement.outerHTML;
-            const commentRegex = /<!--\s*COMMENT:\s*(.*?)\s*USER:\s*(.*?)\s*TIMESTAMP:\s*(.*?)\s*-->/gs;
-            const comments = [];
-            let match;
-
-            while ((match = commentRegex.exec(htmlContent)) !== null) {
-                comments.push({
-                    text: match[1].trim(),
-                    user: match[2].trim(),
-                    timestamp: match[3].trim()
-                });
-            }
-
-            // Process comments from current user that haven't been processed
-            const {data: existingPlugins} = await room.collection('plugin').getList();
-            
-            for (const comment of comments) {
-                if (comment.user === currentUser.username) {
-                    const alreadyProcessed = existingPlugins.some(p => 
-                        p.comment_text === comment.text && p.comment_user === comment.user
-                    );
-
-                    if (!alreadyProcessed) {
-                        await generateAndApplyPlugin(comment);
-                    }
-                }
-            }
-        }
-
+        // Function to generate and apply plugin
         async function generateAndApplyPlugin(comment) {
+            let processingEntry = null;
             try {
                 // Create processing entry
-                const processingEntry = await room.collection('plugin').upsert({
+                processingEntry = await room.collection('plugin').upsert({
                     comment_text: comment.text,
                     comment_user: comment.user,
                     status: 'processing',
                     retry_count: 0
                 });
 
+                console.log('Processing comment:', comment.text, 'for user:', comment.user);
+
                 // Generate plugin using LLM
                 const pluginJson = await generatePluginWithLLM(comment.text);
+                
+                console.log('Generated plugin:', pluginJson);
                 
                 // Validate and sandbox test
                 await pluginSystem.sandboxTest(pluginJson);
@@ -269,24 +240,86 @@
                 // Apply to page
                 await pluginSystem.applyPlugin(pluginJson);
 
+                console.log('Plugin applied successfully:', pluginJson.name);
+
             } catch (error) {
                 console.error('Plugin generation failed:', error);
                 
-                // Update database with error
-                await room.collection('plugin').upsert({
-                    id: processingEntry.id,
-                    status: 'error',
-                    error_message: error.message,
-                    retry_count: (processingEntry.retry_count || 0) + 1
-                });
+                // Update database with error only if we have a processing entry
+                if (processingEntry && processingEntry.id) {
+                    try {
+                        await room.collection('plugin').upsert({
+                            id: processingEntry.id,
+                            status: 'error',
+                            error_message: error.message,
+                            retry_count: (processingEntry.retry_count || 0) + 1
+                        });
 
-                // Retry with error feedback if under retry limit
-                if ((processingEntry.retry_count || 0) < 2) {
-                    setTimeout(() => retryPluginGeneration(processingEntry.id, comment, error.message), 5000);
+                        // Retry with error feedback if under retry limit
+                        if ((processingEntry.retry_count || 0) < 2) {
+                            setTimeout(() => retryPluginGeneration(processingEntry.id, comment, error.message), 5000);
+                        }
+                    } catch (dbError) {
+                        console.error('Failed to update error status:', dbError);
+                    }
+                } else {
+                    console.error('No processing entry to update with error');
                 }
             }
         }
 
+        // Comment processor
+        async function processMetadataComments() {
+            try {
+                const currentUser = await window.websim.getCurrentUser();
+                if (!currentUser) {
+                    console.log('No current user found');
+                    return;
+                }
+
+                console.log('Current user:', currentUser.username);
+
+                // Extract comments from HTML
+                const htmlContent = document.documentElement.outerHTML;
+                const commentRegex = /<!--\s*COMMENT:\s*(.*?)\s*USER:\s*(.*?)\s*TIMESTAMP:\s*(.*?)\s*-->/gs;
+                const comments = [];
+                let match;
+
+                while ((match = commentRegex.exec(htmlContent)) !== null) {
+                    comments.push({
+                        text: match[1].trim(),
+                        user: match[2].trim(),
+                        timestamp: match[3].trim()
+                    });
+                }
+
+                console.log('Found comments:', comments);
+
+                // Process comments from current user that haven't been processed
+                const existingPlugins = await room.collection('plugin').getList();
+                console.log('Existing plugins:', existingPlugins);
+                
+                for (const comment of comments) {
+                    console.log('Checking comment:', comment.text, 'by user:', comment.user);
+                    if (comment.user === currentUser.username) {
+                        const alreadyProcessed = existingPlugins.some(p => 
+                            p.comment_text === comment.text && p.comment_user === comment.user
+                        );
+
+                        console.log('Already processed?', alreadyProcessed);
+
+                        if (!alreadyProcessed) {
+                            console.log('Processing new comment:', comment.text);
+                            await generateAndApplyPlugin(comment);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error in processMetadataComments:', error);
+            }
+        }
+
+        // Function to generate plugin using LLM
         async function generatePluginWithLLM(commentText) {
             const systemPrompt = `You are a plugin generator for a self-evolving webpage. Generate a valid JSON plugin based on the user's comment.
 
@@ -321,6 +354,7 @@ Rules:
             return JSON.parse(completion.content);
         }
 
+        // Function to retry plugin generation
         async function retryPluginGeneration(pluginId, comment, previousError) {
             try {
                 const retryPrompt = `Previous attempt failed with error: ${previousError}. Please fix and try again: ${comment.text}`;
@@ -365,15 +399,19 @@ Rules:
             // Check for new comments periodically
             useEffect(() => {
                 const interval = setInterval(async () => {
+                    console.log('Checking for new comments...');
                     setIsProcessing(true);
                     try {
                         await processMetadataComments();
+                    } catch (error) {
+                        console.error('Error checking comments:', error);
                     } finally {
                         setIsProcessing(false);
                     }
                 }, 10000);
 
                 // Initial check
+                console.log('Initial comment check...');
                 processMetadataComments();
 
                 return () => clearInterval(interval);
